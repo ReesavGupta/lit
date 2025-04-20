@@ -17,6 +17,8 @@ func main() {
 		InitRepository()
 	case "cat-file":
 		CatFile()
+	case "hash-object":
+		HashObject()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)

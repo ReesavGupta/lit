@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"compress/zlib"
+	"crypto/sha1"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 func InitRepository() {
@@ -91,4 +94,96 @@ func CatFile() {
 		fmt.Print(header)
 	}
 
+}
+
+func HashObject() {
+
+	/*
+			git hash-object is used to compute the SHA hash of a Git object.
+			When used with the -w flag, it also writes the object to the .git/objects directory.
+
+			# Create a file with some content
+		  $ echo -n "hello world" > test.txt
+
+		  # Compute the SHA hash of the file + write it to .git/objects
+		  $ git hash-object -w test.txt
+		  95d09f2b10159347eece71399a7e2e907ea3df4f
+
+		  # Verify that the file was written to .git/objects
+		  $ file .git/objects/95/d09f2b10159347eece71399a7e2e907ea3df4f
+		  .git/objects/95/d09f2b10159347eece71399a7e2e907ea3df4f: zlib compressed data
+	*/
+
+	fs := flag.NewFlagSet("hash-object", flag.ExitOnError)
+
+	var write bool
+	fs.BoolVar(&write, "w", false, "writes the hash object to the .git/objects dir")
+	// lit hash-object -w text.txt
+	fs.Parse(os.Args[2:])
+
+	filePath := fs.Arg(0)
+
+	content, err := os.ReadFile(filePath)
+
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Could not open the file")
+		os.Exit(1)
+	}
+
+	info, err := os.Stat(filePath)
+
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Could not open the file")
+		os.Exit(1)
+	}
+
+	headerAndContent := fmt.Sprintf("blob %d\x00%s", info.Size(), string(content))
+
+	sha := sha1.Sum([]byte(headerAndContent))
+
+	hash := fmt.Sprintf("%x", sha)
+
+	blobName := []rune(hash)
+	blobPath := "./.git/objects/"
+
+	for i, v := range blobName {
+		blobPath += string(v)
+		if i == 1 {
+			blobPath += "/"
+		}
+	}
+
+	var buffer bytes.Buffer
+
+	zw := zlib.NewWriter(&buffer)
+
+	_, err = zw.Write([]byte(headerAndContent))
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error while writing compressing the header and content")
+		zw.Close()
+		os.Exit(1)
+	}
+	zw.Close()
+
+	if write {
+		err := os.MkdirAll(filepath.Dir(blobPath), os.ModePerm)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Could not create the directory ")
+			os.Exit(1)
+		}
+		f, err := os.Create(blobPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error creating the file")
+			os.Exit(1)
+		}
+		_, err = f.Write(buffer.Bytes())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error writing the contents of the buffer to the created file")
+			os.Exit(1)
+		}
+		f.Close()
+	}
+
+	fmt.Print(hash)
 }
