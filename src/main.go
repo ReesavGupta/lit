@@ -19,6 +19,8 @@ func main() {
 		CatFile()
 	case "hash-object":
 		HashObject()
+	case "ls-tree":
+		LsTree()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 		os.Exit(1)
