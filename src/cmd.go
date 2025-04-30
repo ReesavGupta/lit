@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"compress/zlib"
 	"crypto/sha1"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 func InitRepository() {
@@ -395,4 +397,95 @@ func WriteTree() {
 	// The git write-tree command creates a tree object from the current state of the "staging area".
 	// The staging area is a place where changes go when you run git add.
 
+	currDirPath := "."
+
+	writeTreeHelper(currDirPath)
+
+}
+func writeTreeHelper(path string) ([20]byte, string, error) {
+	dirInfos, err := os.ReadDir(path)
+
+	if err != nil {
+		return [20]byte{}, "", err
+	}
+	entries := []string{}
+	for _, item := range dirInfos {
+		if item.Name() == ".git" {
+			continue
+		}
+
+		if item.IsDir() {
+			hash, _, err := writeTreeHelper(filepath.Join(path, item.Name()))
+
+			if err != nil {
+				return [20]byte{}, "", err
+			}
+
+			row := fmt.Sprintf("4000 %s\x00%s", item.Name(), hash)
+
+			entries = append(entries, row)
+
+			continue
+		}
+
+		fileContent, err := os.ReadFile(filepath.Join(path, item.Name()))
+
+		if err != nil {
+			panic(err)
+		}
+		hashKey, _, err := writeObject("blob", fileContent)
+
+		if err != nil {
+			return [20]byte{}, "", err
+		}
+		row := fmt.Sprintf("100644 %s\x00%s", item.Name(), hashKey)
+		entries = append(entries, row)
+	}
+	// sort by `name`
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i][strings.IndexByte(entries[i], ' ')+1:] < entries[j][strings.IndexByte(entries[i], ' ')+1:]
+	})
+	var buffer bytes.Buffer
+	for _, e := range entries {
+		buffer.WriteString(e)
+	}
+	return writeObject("tree", buffer.Bytes())
+}
+
+func writeObject(t string, data []byte) ([20]byte, string, error) {
+	header := fmt.Sprintf("%s %d\x00", t, len(data))
+
+	storeContent := append([]byte(header), data...)
+
+	hashKeyBytes := sha1.Sum(storeContent)
+
+	hashKey := hex.EncodeToString(hashKeyBytes[:])
+
+	if len(hashKey) != 40 {
+		return [20]byte{}, "", fmt.Errorf("length hash key=%d invalid", len(hashKey))
+	}
+
+	dir := fmt.Sprintf(".git/objects/%s", hashKey[:2])
+
+	filePath := fmt.Sprintf("%s/%s", dir, hashKey[2:])
+
+	if err := os.MkdirAll(string(dir), 0755); err != nil {
+		return [20]byte{}, "", fmt.Errorf("mkdir %s got err=%w", string(dir), err)
+	}
+	var buff bytes.Buffer
+	zw := zlib.NewWriter(&buff)
+	_, err := zw.Write(storeContent)
+
+	if err != nil {
+		return [20]byte{}, "", fmt.Errorf("write zlib to buffer got err=%w", err)
+	}
+
+	zw.Close()
+
+	err = os.WriteFile(filePath, buff.Bytes(), 0755)
+	if err != nil {
+		return [20]byte{}, "", fmt.Errorf("write content to file=%s got err=%w", filePath, err)
+	}
+
+	return hashKeyBytes, hashKey, nil
 }
